@@ -1,0 +1,4 @@
+doc/documentation.pdf
+doc/documentation.aux
+doc/documentation.log
+*.pyc

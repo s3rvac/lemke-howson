@@ -1,0 +1,440 @@
+%
+% Encoding: utf-8
+% Project:	Implementation of the Lemke-Howson algorithm for finding MNE
+% Author:	Petr Zemek <s3rvac@gmail.com>, 2009
+%
+% Project documentation.
+%
+\documentclass[a4paper,10pt]{article}
+
+% Packages
+\usepackage[utf8]{inputenc}
+\usepackage{url}
+
+% View
+\setlength{\hoffset}{-1.5cm}
+\setlength{\voffset}{-1.5cm}
+\setlength{\textheight}{23.0cm}
+\setlength{\textwidth}{15.2cm}
+
+% Paragraph formatting - no indents
+\setlength{\parskip}{1.3ex plus 0.2ex minus 0.2ex}
+\setlength{\parindent}{0pt}
+
+% Text
+\begin{document}
+
+% Title
+\begin{center}
+	\begin{Large}\textbf{Implementation of the Lemke-Howson
+	algorithm}\end{Large} \\
+
+	\vspace{0.4cm}
+
+	Petr Zemek, \texttt{s3rvac@gmail.com}
+
+	\vspace{0.4cm}
+
+	\today
+\end{center}
+
+\section{Introduction}
+
+This documentation describes my implementation of the Lemke-Howson algorithm
+\cite{Lemke64} for finding mixed Nash equilibria in two-person games. For the
+sake of clarity, a running example is used to explain the algorithm and the
+implementation of it. For a formal description of the algorithm, please refer
+to \cite{Lemke64} or \cite{Pritchard08}.
+
+The implementation itself is described in section \ref{sec:Implementation}. The
+way how the implementation was tested is outlined in section \ref{sec:Testing}.
+Project summarization is given in the conclusion (section
+\ref{sec:Conclusion}).
+
+\section{Implementation}
+\label{sec:Implementation}
+
+The implementation is written in
+\emph{Python}\footnote{\url{http://www.python.org/}}, which is a portable,
+object oriented, dynamic scripting language suitable for tasks like this. Used
+Python version is 2.5. The following modules from the Python standard library
+were used: \texttt{os}, \texttt{pkgutil}, \texttt{re}, \texttt{sys},
+\texttt{tempfile} and \texttt{unittest}.
+
+To illustrate the algorithm and corresponding parts of its implementation, the
+following game will be used as a running example (player A has strategies 1 and
+2 and player B has strategies 3, 4 and 5):
+
+\begin{center}
+	\begin{tabular}{c||c|c|c}
+		A/B & 3 & 4 & 5 \\
+		\hline
+		\hline
+		1 & 0,1 & 2,-1 & 3,0 \\
+		\hline
+		2 & 3,-1 & -2,1 & 2,-2 \\
+	\end{tabular}
+\end{center}
+
+\subsection{Custom supportive modules}
+
+Because I did not find any suitable module in the standard library for working
+with matrices and rational numbers (I did not want to use en external numeric
+library), I implemented the two following supportive modules from scratch.
+
+\subsubsection{Matrices}
+
+Module \texttt{matrix} provides a representation of two-dimensional matrices
+(implemented in a two dimensional array using lists) and a function for parsing
+matrices from text. Only basic needed operations over matrices were implemented
+(getting and setting values on given index, matrix conversion to its textual
+representation).
+
+\subsubsection{Rational numbers}
+
+For the sake of precision of the Lemke-Howson algorithm implementation and
+testing (float numbers are hard to test on equality), I implemented my own
+representation of rational numbers and basic operations over them. Module
+\texttt{rational} provides basic operations over rational numbers, such as
+addition, multiplication, negation, division, absolute value, reciprocal value
+and conversion from and to textual representation.
+
+\subsection{Input}
+
+The game described in the beginning of section \ref{sec:Implementation} is
+passed to the program in the following form (there must be a new line character
+at the end of each line):
+
+\begin{verbatim}
+0 2 3
+3 -2 2
+
+1 -1 0
+-1 1 -2
+\end{verbatim}
+
+The previous text is parsed (using my modules \texttt{io} and \texttt{matrix})
+into the two following matrices:
+
+\begin{minipage}[b]{0.5\linewidth}
+	$$A = \left(
+	\begin{array}{ccc}
+	0 & 2 & 3 \\
+	3 & -2 & 2
+	\end{array}
+	\right)$$
+\end{minipage}
+\begin{minipage}[b]{0.5\linewidth}
+	$$B = \left(
+	\begin{array}{ccc}
+	1 & -1 & 0 \\
+	-1 & 1 & -2
+	\end{array}
+	\right)$$
+\end{minipage}
+
+These two matrices are the input for the Lemke-Howson algorithm.
+
+\subsection{Lemke-Howson algorithm}
+
+The implementation of the Lemke-Howsown algorithm is in the module \texttt{lh}.
+
+\subsubsection{Initialization}
+
+Aside from some limitations of the algorithm (see section
+\ref{sec:Limitations}), the used method only works when there are no negative
+elements in both matrices and there is no column or row with all zeros
+\cite{Pritchard08}. To assure this, a proper constant is added to both matrices
+(this does not affect the game and the resulting game is equivalent to the
+original game \cite{Pritchard08}). In our example, the lowest value is $-2$, so
+we add $3$ to each matrix cell\footnote{In this example, adding $2$ would be
+enough, but it might not suffice in all cases, so a greater number is added.}.
+
+\begin{minipage}[b]{0.5\linewidth}
+	$$A^{'} = \left(
+	\begin{array}{c c c}
+	3 & 5 & 6 \\
+	6 & 1 & 5
+	\end{array}
+	\right)$$
+\end{minipage}
+\begin{minipage}[b]{0.5\linewidth}
+	$$B^{'} = \left(
+	\begin{array}{c c c}
+	4 & 2 & 3 \\
+	2 & 4 & 1
+	\end{array}
+	\right)$$
+\end{minipage}
+
+My implementation of the Lemke-Howson algorithm is based on the \emph{Tableaux
+method} \cite{Pritchard08}. The two input matrices are converted into a
+\emph{tableaux} (a system of linear equations containing data from both
+input matrices and additional variables needed in the computation).
+
+From the algebraic point of view, the tableaux corresponding to our game
+looks like this (with modified matrices $A^{'}$ and $B^{'}$ to assure the
+assumptions described above):
+
+$$\begin{array}{r r r r r r r r}
+s_{1} = 1 &         &         & -3x_{3} & -5x_{4} & -6x_{5} \\
+s_{2} = 1 &         &         & -6x_{3} & -x_{4}  & -5x_{5} \\
+s_{3} = 1 & -4x_{1} & -2x_{2} &         &         &         \\
+s_{4} = 1 & -2x_{1} & -4x_{2} &         &         &         \\
+s_{5} = 1 & -3x_{1} & -x_{2}  &         &         &
+\end{array}$$
+
+$s_{1}, \dots, s_{5}$ are called \emph{slack} variables and $x_{1}, \dots,
+x_{5}$ are called \emph{actual} variables. As you can see, the system contains
+one slack variable, one actual variable and one equation for each strategy in
+the game. Coefficients are negated values from original matrices $A^{'}$ and
+$B^{'}$. The leftmost column is called a \emph{basis} and variables that are on
+the left side of equations are called \emph{in basis}. Variables on the right
+side of the equation are called \emph{out of the basis}. At the beginning, all
+slack variables are in the basis and all actual variables are out of the basis.
+The ones in the first column on the right side are initial basis values (these
+will form the game equilibrium at the end of computation).
+
+From the implementation point of view, the tableaux corresponding to our game
+looks like this (again, with modified matrices $A^{'}$ and $B^{'}$ to assure
+some conditions):
+
+$$\left(\begin{array}{r r r r r r r}
+-1 & 1 & 0 & 0 & -3 & -5 & -6 \\
+-2 & 1 & 0 & 0 & -6 & -1 & -5 \\
+-3 & 1 & -4 & -2 & 0 & 0 & 0 \\
+-4 & 1 & -2 & -4 & 0 & 0 & 0 \\
+-5 & 1 & -3 & -1 & 0 & 0 & 0
+\end{array}\right)$$
+
+The first column contains indices of variables, which are currently in the
+basis. Negative indices mark slack variables and positive indices marks actual
+variables (all actual variables are initially out of the basis). The second
+column contains value of variables in the basis. The rest of the tableaux
+contain coefficients of slack variables and actual variables.
+
+Cells initially containing zeros represents coefficients of slack variables.
+This corresponds to the fact that all slack variables are initially in the
+basis. In more detail, the third and fourth column of first two rows contain
+coefficients of slack variables $s_{1}$ and $s_{2}$, respectively. The fifth,
+sixth and seventh column of the last three rows contain coefficients of slack
+variables $s_{3}, s_{4}$ and $s_{5}$, respectively.
+
+The used implementation layout of the tableaux is similar to the one presented
+in \cite{Codenotti08}, but I put both matrices into a single tableaux (I do not
+have to pass two matrices, since one is enough) and I use a different
+indexing scheme.
+
+\subsubsection{Computation}
+
+Once the tableaux is initialized, we can begin with the computation. The used
+method is iterative and is called \emph{pivoting}. At each step, one variable
+\emph{will be brought into the basis} (pivot) and \emph{one variable will left
+the basis} (it will tell us what the next pivot will be). If a variable $x_{1}$
+is to enter the basis, we will search for an equation in which this variable
+has the lowest \emph{min-ratio} (lowest negated value of the current basis
+value divided by the entering variable coefficient). The right side of the
+equation, in which the variable entered the basis, will be then substituted to
+other equations.
+
+The variable that left the basis (was ``replaced" with the variable that
+entered the basis) will be used to compute the next variable that will enter
+the basis. If variable $s_{i}$ just left the basis, then $x_{i}$ will be
+brought in in the next step and vice versa.
+
+As I use $x_{1}$ as an initial variable that enters the basis\footnote{The
+index does not matter --- you could pick any $x_{i}$ \cite{Pritchard08}.}, we
+will keep pivoting until $x_{1}$ or $s_{1}$ leaves the basis.
+
+I will present the very first step of the computation on our game in both
+representation (the algebraic one and the implemented one). Next steps
+will be only shown from the implementation point of view.
+
+As shown in the previous subsection, the following system is the tableaux
+corresponding to our game (in the algebraic form).
+
+$$\begin{array}{r r r r r r r r}
+s_{1} = 1 &         &         & -3x_{3} & -5x_{4} & -6x_{5} \\
+s_{2} = 1 &         &         & -6x_{3} & -x_{4}  & -5x_{5} \\
+s_{3} = 1 & -4x_{1} & -2x_{2} &         &         &         \\
+s_{4} = 1 & -2x_{1} & -4x_{2} &         &         &         \\
+s_{5} = 1 & -3x_{1} & -x_{2}  &         &         &
+\end{array}$$
+
+Lets start pivoting and bring $x_{1}$ into the basis. The lowest ratio has
+$x_{1}$ in the third equation ($-1/(-4) = 1/4$), so we have to pick
+$x_{1}$ in this equation. We will move $x_{1}$ to the left side of the equation
+and $s_{3}$ to the right side of the equation, properly divide all coefficients
+and then we will substitute $x_{1}$ into the fourth and fifth equation, thus
+obtaining the following system.
+
+$$\begin{array}{r r r r r r r r}
+s_{1} & = & 1 &             &           & -3x_{3} & -5x_{4} & -6x_{5} \\
+s_{2} & = & 1 &             &           & -6x_{3} & -x_{4}  & -5x_{5} \\
+x_{1} & = & 1/4 & -1/4s_{3} & -1/2x_{2} &         &         &         \\
+s_{4} & = & 1/2 & 1/2s_{3}  & -3x_{2}   &         &         &         \\
+s_{5} & = & 1/4 & 3/4s_{3}  & 1/2x_{2}  &         &         &
+\end{array}$$
+
+The situation in the implemented tableaux is analogical. We will brought
+$x_{1}$ ($1$) into the basis and $s_{3}$ ($-3$) will leave the basis.
+
+$$\left(\begin{array}{r r r r r r r}
+-1 & 1 & 0 & 0 & -3 & -5 & -6 \\
+-2 & 1 & 0 & 0 & -6 & -1 & -5 \\
+1 & 1/4 & 0 & -1/2 & -1/4 & 0 & 0 \\
+-4 & 1/2 & 0 & -3/1 & 1/2 & 0 & 0 \\
+-5 & 1/4 & 0 & 1/2 & 3/4 & 0 & 0 \\
+\end{array}\right)$$
+
+Since $s_{3}$ ($-3$) left the basis, $x_{3}$ ($3$) will enter the basis in the
+next step.
+
+$$\left(\begin{array}{r r r r r r r}
+-1 & 1/2 & 0 & 1/2 & 0 & -9/2 & -7/2 \\
+3 & 1/6 & 0 & -1/6 & 0 & -1/6 & -5/6 \\
+1 & 1/4 & 0 & -1/2 & -1/4 & 0 & 0 \\
+-4 & 1/2 & 0 & -3/1 & 1/2 & 0 & 0 \\
+-5 & 1/4 & 0 & 1/2 & 3/4 & 0 & 0 \\
+\end{array}\right)$$
+
+In the previous step, $s_{2}$ ($-2$) left the basis, so $x_{2}$ ($2$) will
+enter the basis.
+
+$$\left(\begin{array}{r r r r r r r}
+-1 & 1/2 & 0 & 1/2 & 0 & -9/2 & -7/2 \\
+3 & 1/6 & 0 & -1/6 & 0 & -1/6 & -5/6 \\
+1 & 1/6 & 0 & 0 & -1/3 & 1/6 & 0 \\
+2 & 1/6 & 0 & 0 & 1/6 & -1/3 & 0 \\
+-5 & 1/3 & 0 & 0 & 5/6 & -1/6 & 0
+\end{array}\right)$$
+
+$s_{4}$ ($-4$) left the basis, so $x_{4}$ ($4$) will enter the basis.
+
+$$\left(\begin{array}{r r r r r r r}
+4 & 1/9 & -2/9 & 1/9 & 0 & 0 & -7/9 \\
+3 & 4/27 & 1/27 & -5/27 & 0 & 0 & -19/27 \\
+1 & 1/6 & 0 & 0 & -1/3 & 1/6 & 0 \\
+2 & 1/6 & 0 & 0 & 1/6 & -1/3 & 0 \\
+-5 & 1/3 & 0 & 0 & 5/6 & -1/6 & 0 \\
+\end{array}\right)$$
+
+As you can see, in the previous step, $s_{1}$ ($-1$) left the basis, which
+means that we are done and the equilibrium was found.
+
+\subsection{Obtaining the equilibrium}
+
+Once we are done with pivoting, we can get the equilibrium from the resulting
+tableaux. Strategy probabilities are in the second column, but we have to
+properly interpret these values. If the value is out of the interval $\langle
+0; 1 \rangle$, then the probability will be $0$ (probability cannot be negative
+or higher that $1$). The values in the first column mark the position of that
+probability. If the position is negative, then the probability on that position
+in absolute value will be $0$.
+
+Bearing that in mind, the equilibrium from our game is $((1/6, 1/6), (4/27,
+1/9, 0))$. As you can see, the probabilities are somewhat weird, because their
+sum is not equal to $1$. Therefore, we have to \emph{normalize} the equilibrium
+using the same procedure as for vector normalization \cite{Pritchard08}.
+
+$$normalized(x) = \left(\sum_{i = 1}^{|x|}x_{i}\right)^{-1}x$$
+
+After the normalization, the equilibrium in mixed strategies in our game is
+$((1/2, 1/2), (4/7, 3/7, 0))$.
+
+\subsection{Output}
+
+After the equilibrium is computed, both matrices and the found equilibrium is
+printed to the standard output.
+
+\subsubsection{Limitations}
+\label{sec:Limitations}
+
+The Lemke-Howson algorithm has some limitations. It finds only one mixed Nash
+equilibrium per game and it works only for two-person games, which are
+non-degenerative \cite{Stengel02, Pritchard08}.
+
+\subsection{Tests}
+
+Module tests were written using standard Python module for unit testing ---
+\texttt{unittest}. Each module has an associated testing module. There is a
+separate test case for each function or class.
+
+\section{Testing and experiments}
+\label{sec:Testing}
+
+The implementation was thoroughly tested using unit-tests. There are 191 tests
+in total, including overall program tests (computing mixed Nash equilibrium for
+various games). All tests can automatically evaluate whether they were
+successful or not, so they do not need any manual inspection (the testing
+script prints just \texttt{OK} if everything went correctly, or an error
+message describing the error). To run the tests, run \texttt{python
+run-tests.py}. As an example, overall algorithm tests were written in the
+following fashion.
+
+\begin{verbatim}
+    def scenarioValidRun(self, m1, m2, expEq):
+        eq = lh.lemkeHowson(m1, m2)
+        self.assertEqual(expEq, eq)
+
+    def testEx1ValidRun(self):
+        expEq = ((r.Rational(1, 2), r.Rational(1, 2)),
+                 (r.Rational(1, 2), r. Rational(1, 2)))
+        self.scenarioValidRun(EX1_M1, EX1_M2, expEq)
+
+    def testEx2ValidRun(self):
+        expEq = ((r.Rational(6, 13), r.Rational(3, 13), r.Rational(4, 13)),
+                 (r.Rational(1, 9), r.Rational(3, 9), r.Rational(5, 9)))
+        self.scenarioValidRun(EX2_M1, EX2_M2, expEq)
+
+    ...
+\end{verbatim}
+
+There is a scenario which takes two matrices and an expected equilibrium. It
+runs the algorithm and then compares the computed result with the expected
+result. There are tests for several games, all of them written in this style.
+
+If you want to try your own experiments, there are several example games
+bundled in the archive (\texttt{game*.txt} files). You can freely modify them
+to create new games (to create new games, just follow the format of the example
+games). For more information about the usage of the program and description of
+the syntax of the input, please see the \texttt{README} file.
+
+\section{Conclusion}
+\label{sec:Conclusion}
+
+With proper supportive modules (matrices and rational numbers --- my own
+implementation was used), the implementation of the Lemke-Howson turned out to
+be fairly straightforward. My goal was to create a clear, working
+implementation of this algorithm for finding mixed Nash equilibria in
+two-person games. To achieve this, test driven development was used during the
+development. Program modules were thoroughly tested using unit-tests, which
+contain 191 tests in total. The program itself was successfully tested on
+various systems, including Debian GNU/Linux and Microsoft Windows XP. Game
+examples were bundled in the project archive.
+
+\subsection*{Metrices}
+
+\noindent
+Source files: 12 (including tests) \\
+Source lines of code: 1962 (without empty lines, including tests)
+
+% References
+\begin{thebibliography}{9}
+	\bibitem{Lemke64} C. E. Lemke and J. J. T. Howson. \textit{Equilibrium
+	points of bimatrix games}. SIAM Journal on Applied Mathematics,
+	12(2):413-423, 1964.
+
+	\bibitem{Stengel02} B. von Stengel. \textit{Computing equilibria for
+	two-person games}. In R. J. Aumann and S. Hart, editors, Handbook of Game
+	Theory, Vol. 3, pages 1723-1759, 2002.
+
+	\bibitem{Pritchard08} D. Pritchard. \textit{The Lemke-Howson algorithm}.
+	Notes on the Game Theory. [online]
+	\url{http://www.math.uwaterloo.ca/~dagpritc/co456/lemke-howson.pdf}, 2008.
+
+	\bibitem{Codenotti08} B. Codenotti, S. D. Rossi, M. Pagan. \textit{An
+	experimental analysis of Lemke-Howson algorithm}. CoRR abs/0811.3247, 2008.
+\end{thebibliography}
+
+\end{document}
